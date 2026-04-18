@@ -15,7 +15,10 @@ let touchStartX = 0;
 let touchStartY = 0;
 let slideTimer = 0; 
 
-let jumpSound, coinSound, crashSound, bgMusic;
+// Audio variables
+let jumpSound, crashSound, bgMusic;
+const coinSounds = [];
+let coinSoundIndex = 0;
 
 init();
 animate();
@@ -53,24 +56,33 @@ function init() {
   player.position.set(lanePositions[1], 1.5, 0);
   scene.add(player);
 
-  // Sounds
+  // === AUDIO SETUP & MIXING ===
   jumpSound = new Audio('/assets/jump.mp3');
-  coinSound = new Audio('/assets/coin.mp3');
+  jumpSound.volume = 1.0; 
+
   crashSound = new Audio('/assets/crash.mp3');
+  crashSound.volume = 1.0;
+
   bgMusic = new Audio('/assets/bg-music.mp3');
   bgMusic.loop = true;
+  bgMusic.volume = 0.3; // Milder background music
+
+  // Coin Audio Pool (Fixes playback failures on rapid collection)
+  for (let i = 0; i < 5; i++) {
+    let snd = new Audio('/assets/coin.mp3');
+    snd.volume = 1.0; // Prominent coin sound
+    coinSounds.push(snd);
+  }
 
   // --- EVENT LISTENERS (Keyboard & Touch) ---
   window.addEventListener('keydown', e => keys[e.key] = true);
   window.addEventListener('keyup', e => keys[e.key] = false);
   
-  // Touch Start
   window.addEventListener('touchstart', e => {
     touchStartX = e.changedTouches[0].screenX;
     touchStartY = e.changedTouches[0].screenY;
   }, { passive: false });
 
-  // Touch End (Evaluates the swipe)
   window.addEventListener('touchend', e => {
     if (!started || gameOverFlag) {
       if (gameOverFlag) location.reload();
@@ -89,6 +101,13 @@ function init() {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
+}
+
+// Audio Helper Function
+function playCoinSound() {
+  coinSounds[coinSoundIndex].currentTime = 0;
+  coinSounds[coinSoundIndex].play().catch(() => {});
+  coinSoundIndex = (coinSoundIndex + 1) % coinSounds.length;
 }
 
 function handleSwipe(startX, startY, endX, endY) {
@@ -127,7 +146,9 @@ function animate() {
     return;
   }
 
-  gameSpeed = Math.min(0.65 + (score / 1400), 3.2);
+  // === PROGRESSIVE DIFFICULTY ===
+  // Ramps up faster, and has a higher top speed
+  gameSpeed = Math.min(0.65 + (score / 1000), 3.8);
 
   // Scroll track
   track.position.z += gameSpeed;
@@ -137,7 +158,7 @@ function animate() {
   if (keys['ArrowLeft'] && currentLane > 0) { currentLane--; player.position.x = lanePositions[currentLane]; keys['ArrowLeft'] = false; }
   if (keys['ArrowRight'] && currentLane < 2) { currentLane++; player.position.x = lanePositions[currentLane]; keys['ArrowRight'] = false; }
 
-  // Keyboard Jump (Instant, wider jump curve)
+  // Keyboard Jump
   if ((keys[' '] || keys['ArrowUp']) && player.position.y <= 1.8) {
     velocityY = 0.65;                    
     jumpSound.currentTime = 0;
@@ -145,7 +166,7 @@ function animate() {
     keys[' '] = keys['ArrowUp'] = false;
   }
 
-  // Slightly softer gravity stretches the curve out
+  // Soft gravity
   velocityY -= 0.025;                    
   player.position.y += velocityY;
 
@@ -162,10 +183,9 @@ function animate() {
       player.position.y = 1.5 + Math.sin(Date.now() / 80) * 0.2;
     }
   } else {
-    // Mid-Air Control (Fast Fall implemented here)
+    // Mid-Air Control (Fast Fall)
     if (keys['ArrowDown'] || slideTimer > 0) {
       player.scale.set(1, 0.5, 1);
-      // Snappy downward pull to interrupt the jump
       velocityY = -0.45; 
       if (slideTimer > 0) slideTimer--;
     } else {
@@ -173,12 +193,15 @@ function animate() {
     }
   }
 
-  // Spawn logic
-  const spawnRate = 0.022 + (score / 4000);
+  // === SPAWN LOGIC ===
+  // Obstacles spawn more frequently as you speed up (capped so it isn't impossible)
+  const spawnRate = Math.min(0.018 + (score / 2500), 0.05); 
+  
   if (Math.random() < spawnRate) {
     const lane = Math.floor(Math.random() * 3);
-    const obs = new THREE.Mesh(new THREE.BoxGeometry(2, 1.8, 2), new THREE.MeshPhongMaterial({ color: 0x00aa00 }));
-    obs.position.set(lanePositions[lane], 1, -70);
+    // SHORTER OBSTACLES: Reduced height to 1.2, lowered Y position to 0.6 so they touch the ground
+    const obs = new THREE.Mesh(new THREE.BoxGeometry(2, 1.2, 2), new THREE.MeshPhongMaterial({ color: 0x00aa00 }));
+    obs.position.set(lanePositions[lane], 0.6, -70);
     scene.add(obs);
     obstacles.push(obs);
   }
@@ -215,15 +238,12 @@ function animate() {
     }
   }
   
-  // Coin Collision (Audio Cloning implemented here)
   for (let i = 0; i < coins.length; i++) {
     if (playerBox.intersectsBox(new THREE.Box3().setFromObject(coins[i]))) {
       score += 20;
       
-      // Clone sound for instant, overlapping playback
-      let soundClone = coinSound.cloneNode(true);
-      soundClone.volume = 0.6; 
-      soundClone.play().catch(() => {});
+      // Use the Audio Pool instead of cloning
+      playCoinSound();
       
       scene.remove(coins[i]);
       coins.splice(i, 1);
