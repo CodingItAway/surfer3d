@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Subway Surfers 3D</title>
+  <style>
+    /* touch-action: none is CRITICAL to stop the page from pulling down/refreshing when swiping */
+    body { 
+      margin: 0; 
+      background: #000; 
+      overflow: hidden; 
+      touch-action: none; 
+      user-select: none; 
+      -webkit-user-select: none; 
+    }
+    canvas { 
+      display: block; 
+      width: 100vw; 
+      height: 100vh; 
+    }
+    #score {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      color: white;
+      font-family: Arial, sans-serif;
+      font-size: 28px;
+      z-index: 100;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+      pointer-events: none; /* Let touches pass right through the text */
+    }
+  </style>
+</head>
+<body>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
