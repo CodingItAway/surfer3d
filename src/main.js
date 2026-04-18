@@ -7,7 +7,9 @@ let velocityY = 0;
 let currentLane = 1;
 const lanePositions = [-2.5, 0, 2.5];
 let score = 0, highScore = 0, gameOverFlag = false, started = false;
-let gameSpeed = 0.65;
+
+// === CHANGED: Start at a much slower, friendly speed ===
+let gameSpeed = 0.45; 
 
 // Swipe & Control variables
 const keys = {};
@@ -15,8 +17,7 @@ let touchStartX = 0;
 let touchStartY = 0;
 let slideTimer = 0; 
 
-// === WEB AUDIO API SETUP (For Zero Latency SFX) ===
-// This completely eliminates the delay of the standard <audio> tag
+// === WEB AUDIO API SETUP ===
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 const audioBuffers = {};
 let bgMusic; 
@@ -33,9 +34,7 @@ async function loadSound(name, url) {
 }
 
 function playSound(name, volume = 1.0) {
-  if (!audioBuffers[name]) return; // Failsafe if sound hasn't loaded yet
-  
-  // Resume AudioContext if browser suspended it (mobile requirement)
+  if (!audioBuffers[name]) return; 
   if (audioCtx.state === 'suspended') audioCtx.resume();
   
   const source = audioCtx.createBufferSource();
@@ -46,7 +45,7 @@ function playSound(name, volume = 1.0) {
   
   source.connect(gainNode);
   gainNode.connect(audioCtx.destination);
-  source.start(0); // Plays instantly
+  source.start(0); 
 }
 
 init();
@@ -85,17 +84,16 @@ function init() {
   player.position.set(lanePositions[1], 1.5, 0);
   scene.add(player);
 
-  // Load Sounds into Memory
+  // Load Sounds
   loadSound('jump', '/assets/jump.mp3');
   loadSound('coin', '/assets/coin.mp3');
   loadSound('crash', '/assets/crash.mp3');
 
-  // Background music remains as <audio> (latency doesn't matter for looping music)
   bgMusic = new Audio('/assets/bg-music.mp3');
   bgMusic.loop = true;
   bgMusic.volume = 0.3; 
 
-  // --- EVENT LISTENERS (Keyboard & Touch) ---
+  // --- EVENT LISTENERS ---
   window.addEventListener('keydown', e => keys[e.key] = true);
   window.addEventListener('keyup', e => keys[e.key] = false);
   
@@ -137,20 +135,16 @@ function handleSwipe(startX, startY, endX, endY) {
   if (Math.abs(deltaX) < minSwipeDistance && Math.abs(deltaY) < minSwipeDistance) return;
 
   if (Math.abs(deltaX) > Math.abs(deltaY)) {
-    // Horizontal Swipe
     if (deltaX > 0 && currentLane < 2) { 
       currentLane++; player.position.x = lanePositions[currentLane]; 
     } else if (deltaX < 0 && currentLane > 0) { 
       currentLane--; player.position.x = lanePositions[currentLane]; 
     }
   } else {
-    // Vertical Swipe
     if (deltaY < 0 && player.position.y <= 1.8) {
-      // JUMP: Snappy force
       velocityY = 0.75; 
-      playSound('jump', 1.0); // Instant audio
+      playSound('jump', 1.0); 
     } else if (deltaY > 0) {
-      // SLIDE / FAST FALL
       slideTimer = 35; 
     }
   }
@@ -164,8 +158,9 @@ function animate() {
     return;
   }
 
-  // Progressive Difficulty
-  gameSpeed = Math.min(0.65 + (score / 1000), 3.8);
+  // === CHANGED: Smoother, much more forgiving speed ramp-up ===
+  // Starts at 0.45, takes 3000 points to ramp up, caps at a slightly friendlier 3.5
+  gameSpeed = Math.min(0.45 + (score / 3000), 3.5);
 
   track.position.z += gameSpeed;
   if (track.position.z > 50) track.position.z = -90;
@@ -176,12 +171,11 @@ function animate() {
 
   // Keyboard Jump
   if ((keys[' '] || keys['ArrowUp']) && player.position.y <= 1.8) {
-    velocityY = 0.75; // Snappy jump force                 
-    playSound('jump', 1.0); // Instant audio
+    velocityY = 0.75;                 
+    playSound('jump', 1.0); 
     keys[' '] = keys['ArrowUp'] = false;
   }
 
-  // Snappy, heavier gravity to pull you down quickly
   velocityY -= 0.035;                    
   player.position.y += velocityY;
 
@@ -198,10 +192,9 @@ function animate() {
       player.position.y = 1.5 + Math.sin(Date.now() / 80) * 0.2;
     }
   } else {
-    // Mid-Air Control (Fast Fall override)
+    // Mid-Air Control
     if (keys['ArrowDown'] || slideTimer > 0) {
       player.scale.set(1, 0.5, 1);
-      // Hard downward force to cut the jump arc
       velocityY = -0.45; 
       if (slideTimer > 0) slideTimer--;
     } else {
@@ -209,13 +202,18 @@ function animate() {
     }
   }
 
-  // === SPAWN LOGIC ===
-  const spawnRate = Math.min(0.018 + (score / 2500), 0.05); 
+  // === CHANGED: Milder Spawn Logic ===
+  // Spawns fewer boxes early on so the player has time to breathe
+  const spawnRate = Math.min(0.012 + (score / 4000), 0.045); 
   
   if (Math.random() < spawnRate) {
     const lane = Math.floor(Math.random() * 3);
-    const obs = new THREE.Mesh(new THREE.BoxGeometry(2, 1.2, 2), new THREE.MeshPhongMaterial({ color: 0x00aa00 }));
-    obs.position.set(lanePositions[lane], 0.6, -70);
+    
+    // === CHANGED: Forgiving Hitboxes ===
+    // Width reduced from 2.0 to 1.6, Height reduced from 1.2 to 1.0. 
+    // This allows the player to barely scrape the sides without dying.
+    const obs = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 1.6), new THREE.MeshPhongMaterial({ color: 0x00aa00 }));
+    obs.position.set(lanePositions[lane], 0.5, -70);
     scene.add(obs);
     obstacles.push(obs);
   }
@@ -254,7 +252,7 @@ function animate() {
   for (let i = 0; i < coins.length; i++) {
     if (playerBox.intersectsBox(new THREE.Box3().setFromObject(coins[i]))) {
       score += 20;
-      playSound('coin', 1.0); // Zero latency coin pickup!
+      playSound('coin', 1.0);
       scene.remove(coins[i]);
       coins.splice(i, 1);
       i--;
@@ -271,7 +269,7 @@ function animate() {
     scoreEl.style.cssText = 'position:absolute;top:20px;left:20px;color:#fff;font-size:28px;font-family:Arial;z-index:100;text-shadow:2px 2px 4px #000;pointer-events:none;';
     document.body.appendChild(scoreEl);
   }
-  scoreEl.innerHTML = `Score: ${Math.floor(score / 8)}<br>High: ${highScore}<br><span style="font-size:18px;color:#ff0">Speed: ${gameSpeed.toFixed(1)}</span>`;
+  scoreEl.innerHTML = `Score: ${Math.floor(score / 8)}<br>High: ${highScore}<br><span style="font-size:18px;color:#ff0">Speed: ${gameSpeed.toFixed(2)}</span>`;
 
   renderer.render(scene, camera);
 }
