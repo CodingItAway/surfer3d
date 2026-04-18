@@ -195,7 +195,7 @@ function animate() {
     // Mid-Air Control
     if (keys['ArrowDown'] || slideTimer > 0) {
       player.scale.set(1, 0.5, 1);
-      velocityY = -0.45; 
+      velocityY = -0.1; 
       if (slideTimer > 0) slideTimer--;
     } else {
       player.scale.set(1, 1, 1);
