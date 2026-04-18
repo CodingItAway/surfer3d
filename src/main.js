@@ -15,10 +15,39 @@ let touchStartX = 0;
 let touchStartY = 0;
 let slideTimer = 0; 
 
-// Audio variables
-let jumpSound, crashSound, bgMusic;
-const coinSounds = [];
-let coinSoundIndex = 0;
+// === WEB AUDIO API SETUP (For Zero Latency SFX) ===
+// This completely eliminates the delay of the standard <audio> tag
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const audioBuffers = {};
+let bgMusic; 
+
+async function loadSound(name, url) {
+  try {
+    const response = await fetch(url);
+    const arrayBuffer = await response.arrayBuffer();
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    audioBuffers[name] = audioBuffer;
+  } catch (e) {
+    console.error(`Failed to load sound: ${name}`, e);
+  }
+}
+
+function playSound(name, volume = 1.0) {
+  if (!audioBuffers[name]) return; // Failsafe if sound hasn't loaded yet
+  
+  // Resume AudioContext if browser suspended it (mobile requirement)
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  
+  const source = audioCtx.createBufferSource();
+  source.buffer = audioBuffers[name];
+  
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.value = volume;
+  
+  source.connect(gainNode);
+  gainNode.connect(audioCtx.destination);
+  source.start(0); // Plays instantly
+}
 
 init();
 animate();
@@ -56,23 +85,15 @@ function init() {
   player.position.set(lanePositions[1], 1.5, 0);
   scene.add(player);
 
-  // === AUDIO SETUP & MIXING ===
-  jumpSound = new Audio('/assets/jump.mp3');
-  jumpSound.volume = 1.0; 
+  // Load Sounds into Memory
+  loadSound('jump', '/assets/jump.mp3');
+  loadSound('coin', '/assets/coin.mp3');
+  loadSound('crash', '/assets/crash.mp3');
 
-  crashSound = new Audio('/assets/crash.mp3');
-  crashSound.volume = 1.0;
-
+  // Background music remains as <audio> (latency doesn't matter for looping music)
   bgMusic = new Audio('/assets/bg-music.mp3');
   bgMusic.loop = true;
-  bgMusic.volume = 0.3; // Milder background music
-
-  // Coin Audio Pool (Fixes playback failures on rapid collection)
-  for (let i = 0; i < 5; i++) {
-    let snd = new Audio('/assets/coin.mp3');
-    snd.volume = 1.0; // Prominent coin sound
-    coinSounds.push(snd);
-  }
+  bgMusic.volume = 0.3; 
 
   // --- EVENT LISTENERS (Keyboard & Touch) ---
   window.addEventListener('keydown', e => keys[e.key] = true);
@@ -86,8 +107,7 @@ function init() {
   window.addEventListener('touchend', e => {
     if (!started || gameOverFlag) {
       if (gameOverFlag) location.reload();
-      started = true;
-      bgMusic.play().catch(() => {});
+      startGame();
       return;
     }
 
@@ -103,11 +123,10 @@ function init() {
   });
 }
 
-// Audio Helper Function
-function playCoinSound() {
-  coinSounds[coinSoundIndex].currentTime = 0;
-  coinSounds[coinSoundIndex].play().catch(() => {});
-  coinSoundIndex = (coinSoundIndex + 1) % coinSounds.length;
+function startGame() {
+  started = true;
+  if (audioCtx.state === 'suspended') audioCtx.resume(); 
+  bgMusic.play().catch(() => {});
 }
 
 function handleSwipe(startX, startY, endX, endY) {
@@ -127,12 +146,11 @@ function handleSwipe(startX, startY, endX, endY) {
   } else {
     // Vertical Swipe
     if (deltaY < 0 && player.position.y <= 1.8) {
-      // Swipe Up (Instant, wider jump curve)
-      velocityY = 0.65;
-      jumpSound.currentTime = 0;
-      jumpSound.play().catch(() => {});
+      // JUMP: Snappy force
+      velocityY = 0.75; 
+      playSound('jump', 1.0); // Instant audio
     } else if (deltaY > 0) {
-      // Swipe Down (Slide / Fast Fall)
+      // SLIDE / FAST FALL
       slideTimer = 35; 
     }
   }
@@ -146,28 +164,25 @@ function animate() {
     return;
   }
 
-  // === PROGRESSIVE DIFFICULTY ===
-  // Ramps up faster, and has a higher top speed
+  // Progressive Difficulty
   gameSpeed = Math.min(0.65 + (score / 1000), 3.8);
 
-  // Scroll track
   track.position.z += gameSpeed;
   if (track.position.z > 50) track.position.z = -90;
 
-  // Keyboard Lane switching
+  // Lane switching
   if (keys['ArrowLeft'] && currentLane > 0) { currentLane--; player.position.x = lanePositions[currentLane]; keys['ArrowLeft'] = false; }
   if (keys['ArrowRight'] && currentLane < 2) { currentLane++; player.position.x = lanePositions[currentLane]; keys['ArrowRight'] = false; }
 
   // Keyboard Jump
   if ((keys[' '] || keys['ArrowUp']) && player.position.y <= 1.8) {
-    velocityY = 0.65;                    
-    jumpSound.currentTime = 0;
-    jumpSound.play().catch(() => {});
+    velocityY = 0.75; // Snappy jump force                 
+    playSound('jump', 1.0); // Instant audio
     keys[' '] = keys['ArrowUp'] = false;
   }
 
-  // Soft gravity
-  velocityY -= 0.025;                    
+  // Snappy, heavier gravity to pull you down quickly
+  velocityY -= 0.035;                    
   player.position.y += velocityY;
 
   // Ground Control
@@ -183,9 +198,10 @@ function animate() {
       player.position.y = 1.5 + Math.sin(Date.now() / 80) * 0.2;
     }
   } else {
-    // Mid-Air Control (Fast Fall)
+    // Mid-Air Control (Fast Fall override)
     if (keys['ArrowDown'] || slideTimer > 0) {
       player.scale.set(1, 0.5, 1);
+      // Hard downward force to cut the jump arc
       velocityY = -0.45; 
       if (slideTimer > 0) slideTimer--;
     } else {
@@ -194,12 +210,10 @@ function animate() {
   }
 
   // === SPAWN LOGIC ===
-  // Obstacles spawn more frequently as you speed up (capped so it isn't impossible)
   const spawnRate = Math.min(0.018 + (score / 2500), 0.05); 
   
   if (Math.random() < spawnRate) {
     const lane = Math.floor(Math.random() * 3);
-    // SHORTER OBSTACLES: Reduced height to 1.2, lowered Y position to 0.6 so they touch the ground
     const obs = new THREE.Mesh(new THREE.BoxGeometry(2, 1.2, 2), new THREE.MeshPhongMaterial({ color: 0x00aa00 }));
     obs.position.set(lanePositions[lane], 0.6, -70);
     scene.add(obs);
@@ -230,8 +244,7 @@ function animate() {
   const playerBox = new THREE.Box3().setFromObject(player);
   for (let obs of obstacles) {
     if (playerBox.intersectsBox(new THREE.Box3().setFromObject(obs))) {
-      crashSound.currentTime = 0;
-      crashSound.play().catch(() => {});
+      playSound('crash', 1.0);
       bgMusic.pause();
       endGame();
       return;
@@ -241,10 +254,7 @@ function animate() {
   for (let i = 0; i < coins.length; i++) {
     if (playerBox.intersectsBox(new THREE.Box3().setFromObject(coins[i]))) {
       score += 20;
-      
-      // Use the Audio Pool instead of cloning
-      playCoinSound();
-      
+      playSound('coin', 1.0); // Zero latency coin pickup!
       scene.remove(coins[i]);
       coins.splice(i, 1);
       i--;
@@ -281,7 +291,6 @@ function endGame() {
 // Initial start via Keyboard
 document.addEventListener('keydown', e => {
   if (!started && (e.key === ' ' || e.key === 'Spacebar')) {
-    started = true;
-    bgMusic.play().catch(() => {});
+    startGame();
   }
 });
