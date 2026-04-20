@@ -8,7 +8,6 @@ let currentLane = 1;
 const lanePositions = [-2.5, 0, 2.5];
 let score = 0, highScore = 0, gameOverFlag = false, started = false;
 
-// Friendly starting speed
 let gameSpeed = 0.45; 
 
 // Swipe & Control variables
@@ -16,6 +15,9 @@ const keys = {};
 let touchStartX = 0;
 let touchStartY = 0;
 let slideTimer = 0; 
+
+// Framerate Limiter
+let lastFrameTime = performance.now();
 
 // === WEB AUDIO API SETUP ===
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -97,9 +99,15 @@ function init() {
   window.addEventListener('keydown', e => keys[e.key] = true);
   window.addEventListener('keyup', e => keys[e.key] = false);
   
+  // Touch Events
   window.addEventListener('touchstart', e => {
     touchStartX = e.changedTouches[0].screenX;
     touchStartY = e.changedTouches[0].screenY;
+  }, { passive: false });
+
+  // === FIX: Prevents browser from pulling-to-refresh or scrolling during swipes ===
+  window.addEventListener('touchmove', e => {
+    e.preventDefault(); 
   }, { passive: false });
 
   window.addEventListener('touchend', e => {
@@ -145,9 +153,7 @@ function handleSwipe(startX, startY, endX, endY) {
       velocityY = 0.75; 
       playSound('jump', 1.0); 
     } else if (deltaY > 0) {
-      // === CHANGED: Snappy Recovery ===
-      // Reduced from 35 down to 15 frames so the player pops back up instantly
-      slideTimer = 15; 
+      slideTimer = 15; // Snappy recovery
     }
   }
 }
@@ -155,12 +161,18 @@ function handleSwipe(startX, startY, endX, endY) {
 function animate() {
   requestAnimationFrame(animate);
 
+  // === FIX: 60 FPS Framerate Lock ===
+  // Prevents the game from speeding up when touching a 120Hz phone screen
+  const now = performance.now();
+  if (now - lastFrameTime < 15) return; 
+  lastFrameTime = now;
+
   if (!started || gameOverFlag) {
     renderer.render(scene, camera);
     return;
   }
 
-  // Smoother, forgiving speed ramp-up
+  // Speed ramp-up
   gameSpeed = Math.min(0.45 + (score / 3000), 3.5);
 
   track.position.z += gameSpeed;
@@ -196,23 +208,18 @@ function animate() {
     // MID-AIR CONTROL (FAST FALL)
     if (keys['ArrowDown'] || slideTimer > 0) {
       player.scale.set(1, 0.5, 1);
-      
-      // Aggressive slam to the ground
-      velocityY = -1.0; 
-      
+      velocityY = -1.0; // Aggressive slam
       if (slideTimer > 0) slideTimer--;
     } else {
       player.scale.set(1, 1, 1);
     }
   }
 
-  // Milder Spawn Logic
+  // Spawn Logic
   const spawnRate = Math.min(0.012 + (score / 4000), 0.045); 
   
   if (Math.random() < spawnRate) {
     const lane = Math.floor(Math.random() * 3);
-    
-    // Forgiving Hitboxes
     const obs = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 1.6), new THREE.MeshPhongMaterial({ color: 0x00aa00 }));
     obs.position.set(lanePositions[lane], 0.5, -70);
     scene.add(obs);
